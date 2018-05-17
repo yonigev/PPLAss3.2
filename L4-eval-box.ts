@@ -59,13 +59,18 @@ const L4applyProcedureNew = (proc: Value4 | Error, args: Array<CExp4>, env:Env):
         return applyPrimitive(proc,<Value4[]>args.map((arg)=>L4ForceValue(arg, env)))
 
     }
+    else if ( !hasNoError(args) )
+        Error(`Bad argument: ${getErrorMessages(args)}`)
     else if(isClosure4(proc)){
-        //evaluate SOME of the args. make a Thunk of the Lazy ones.
-        const newArgs=zip(proc.params,args).map((pair)=>  isLazyVarDecl(pair["0"] ?   makeThunk(pair["1"],env)    :
-                                                                    L4applicativeEval(pair["1"],env)));
-        return applyClosure4(proc,newArgs);
-
+            
+    const newArgs=zip(proc.params, args).map((p)=>   isLazyVarDecl(p["0"])   ? makeThunk(p["1"],env) : L4applicativeEval(p["1"],env));
+     if(!hasNoError(newArgs))    
+        return Error(`Bad argument: ${getErrorMessages(newArgs)}`)                                   
+    return applyClosure4(proc,newArgs);
     }
+    else
+        return Error(`Bad procedure ${JSON.stringify(proc)}`);
+ 
 }
     //2.can get a Thunk argument. if so - Force it's value and then answer
 export const isTrueValue = (x: Value4 | Thunk |Error): boolean | Error =>
@@ -124,7 +129,7 @@ const evalDefineExps4 = (exps: Exp4[]): Value4 | Error => {
 // LET: Direct evaluation rule without syntax expansion
 // compute the values, extend the env, eval the body.
 const evalLet4 = (exp: LetExp4, env: Env): Value4 | Error => {
-    const vals: Array <Value4 | Error> = map((v) => L4applicativeEval(v, env), map((b) => b.val, exp.bindings));
+    const vals: Array <Value4 | Thunk | Error> = map((v) => L4applicativeEval(v, env), map((b) => b.val, exp.bindings));
     const vars = map((b) => b.var.var, exp.bindings);
     if (hasNoError(vals)) {
         return evalExps(exp.body, makeExtEnv(vars, vals, env));

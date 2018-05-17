@@ -4,7 +4,7 @@
 // 1. refer to L4-env-box in Closure4
 // 2. introduce void value type
 
-import { isPrimOp, PrimOp, VarDecl } from './L3-ast';
+import { isPrimOp, PrimOp, VarDecl, LazyVarDecl } from './L3-ast';
 import { isEmptySExp, isSymbolSExp, makeEmptySExp, makeSymbolSExp, EmptySExp, SymbolSExp } from './L3-value';
 import { CExp4 } from './L4-ast-box';
 import { Env } from './L4-env-box';
@@ -20,11 +20,11 @@ export const isFunctional = (x: any): x is Functional => isPrimOp(x) || isClosur
 // We also use a frame-based representation of closures as opposed to one env per var.
 export interface Closure4 {
     tag: "Closure4";
-    params: VarDecl[];
+    params: (VarDecl | LazyVarDecl)[];
     body: CExp4[];
     env: Env;
 };
-export const makeClosure4 = (params: VarDecl[], body: CExp4[], env: Env): Closure4 =>
+export const makeClosure4 = (params: (VarDecl | LazyVarDecl)[], body: CExp4[], env: Env): Closure4 =>
     ({tag: "Closure4", params: params, body: body, env: env});
 export const isClosure4 = (x: any): x is Closure4 => x.tag === "Closure4";
 

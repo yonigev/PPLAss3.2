@@ -49,15 +49,15 @@ const setBox = <T>(b: Box<T>, v: T): void => { b[0] = v; return; }
 interface FBinding {
     tag: "FBinding";
     var: string;
-    val: Box<Value4>;
+    val: Box<Value4 | Thunk>;
 };
 
 const isFBinding = (x: any): x is FBinding => x.tag === "FBinding";
-const makeFBinding = (v: string, val: Value4): FBinding =>
+const makeFBinding = (v: string, val: Value4|Thunk): FBinding =>
     ({tag: "FBinding", var: v, val: makeBox(val)});
 const getFBindingVar = (f: FBinding): string => f.var;
-export const getFBindingVal = (f: FBinding): Value4 => unbox(f.val);
-export const setFBinding = (f: FBinding, val: Value4): void => { setBox(f.val, val); return; };
+export const getFBindingVal = (f: FBinding): Value4 | Thunk => unbox(f.val);
+export const setFBinding = (f: FBinding, val: Value4 |Thunk): void => { setBox(f.val, val); return; };
 
 // ========================================================
 // Frame
@@ -66,19 +66,19 @@ interface Frame {
     fbindings: FBinding[];
 };
 
-const makeFrame = (vars: string[], vals: Value4[]): Frame =>
+const makeFrame = (vars: string[], vals: (Value4 | Thunk)[]): Frame =>
     ({tag: "Frame", fbindings: zipWith(makeFBinding, vars, vals)});
-const extendFrame = (frame: Frame, v: string, val: Value4): Frame =>
+const extendFrame = (frame: Frame, v: string, val: Value4 | Thunk): Frame =>
     ({tag: "Frame", fbindings: [makeFBinding(v, val)].concat(frame.fbindings)});
 const isFrame = (x: any): x is Frame => x.tag === "Frame";
 const frameVars = (frame: Frame): string[] => map(getFBindingVar, frame.fbindings);
-const frameVals = (frame: Frame): Value4[] => map(getFBindingVal, frame.fbindings);
+const frameVals = (frame: Frame): (Value4| Thunk)[] => map(getFBindingVal, frame.fbindings);
 
 const applyFrame = (frame: Frame, v: string): FBinding | Error => {
     const pos = frameVars(frame).indexOf(v);
     return (pos > -1) ? frame.fbindings[pos] : Error(`Var not found: ${v}`);
 };
-const setVarFrame = (frame: Frame, v: string, val: Value4): void | Error => {
+const setVarFrame = (frame: Frame, v: string, val: Value4| Thunk): void | Error => {
     const bdg = applyFrame(frame, v);
     return isError(bdg) ? bdg : setFBinding(bdg, val);
 }
@@ -103,7 +103,7 @@ Purpose: lookup the value of var in env.
 Signature: applyEnv(env, var)
 Type: [Env * string -> Value4 | Error]
 */
-export const applyEnv = (env: Env, v: string): Value4 | Error => {
+export const applyEnv = (env: Env, v: string): Value4| Thunk | Error => {
     const bdg = applyEnvBdg(env, v);
     return isError(bdg) ? bdg : getFBindingVal(bdg);
 }
@@ -119,21 +119,21 @@ export interface ExtEnv {
 //added 3.2
 export interface Thunk {
     tag: "Thunk";
-    arg: CExp4;
+    exp: CExp4;
     env: Env;
 };
 export const isThunk = (x:any): x is Thunk => x.tag === "Thunk";
 
-export const makeThunk = (arg: CExp4, env: Env): Thunk =>
-    ({tag: "Thunk", arg:arg, env: env});
+export const makeThunk = (exp: CExp4, env: Env): Thunk =>
+    ({tag: "Thunk", exp:exp, env: env});
     
 
 export const isExtEnv = (x: any): x is ExtEnv => x.tag === "ExtEnv";
-export const makeExtEnv = (vs: string[], vals: Value4[], env: Env): ExtEnv =>
+export const makeExtEnv = (vs: string[], vals: (Value4| Thunk)[], env: Env): ExtEnv =>
     ({tag: "ExtEnv", frame: makeFrame(vs, vals), env: env});
 export const ExtEnvVars = (env: ExtEnv): string[] =>
     map(getFBindingVar, env.frame.fbindings);
-export const ExtEnvVals = (env: ExtEnv): Value4[] =>
+export const ExtEnvVals = (env: ExtEnv): (Value4| Thunk)[] =>
     map(getFBindingVal, env.frame.fbindings);
 
 const applyExtEnvBdg = (env: ExtEnv, v: string): FBinding | Error => {
@@ -158,7 +158,7 @@ export const theGlobalEnv = makeGlobalEnv();
 
 const globalEnvSetFrame = (ge: GlobalEnv, f: Frame): void => setBox(ge.frame, f);
 
-export const globalEnvAddBinding = (v: string, val: Value4): void =>
+export const globalEnvAddBinding = (v: string, val: Value4| Thunk): void =>
     globalEnvSetFrame(theGlobalEnv,
                       extendFrame(unbox(theGlobalEnv.frame), v, val));
 

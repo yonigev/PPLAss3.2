@@ -2,7 +2,7 @@
 // L4 with mutation (set!) and env-box model
 
 import { filter, map, reduce, repeat, zip, zipWith } from "ramda";
-import { isArray, isBoolean, isEmpty, isNumber, isString, LazyVarDecl, CExp, isLazyVarDecl } from "./L3-ast";
+import { isArray, isBoolean, isEmpty, isNumber, isString, isLazyVarDecl } from "./L3-ast";
 import { AtomicExp, BoolExp, LitExp, NumExp, PrimOp, StrExp, VarDecl, VarRef } from "./L3-ast";
 import { isBoolExp, isLitExp, isNumExp, isPrimOp, isStrExp, isVarRef } from "./L3-ast";
 import { makeAppExp, makeBoolExp, makeIfExp, makeLitExp, makeNumExp, makeProcExp, makeStrExp,
@@ -14,7 +14,7 @@ import { isAppExp4, isCExp4, isDefineExp4, isExp4, isIfExp4, isLetrecExp4, isLet
          isLitExp4, isProcExp4, isProgram4, isSetExp4 } from "./L4-ast-box";
 import { parseL4 } from "./L4-ast-box";
 import { applyEnv, applyEnvBdg, globalEnvAddBinding, makeExtEnv, setFBinding,
-         theGlobalEnv, Env, makeThunk } from "./L4-env-box";
+         theGlobalEnv, Env, Thunk, makeThunk, isThunk } from "./L4-env-box";
 import { isClosure4, isCompoundSExp4, isSExp4, makeClosure4, makeCompoundSExp4,
          Closure4, CompoundSExp4, SExp4, Value4 } from "./L4-value-box";
 import { getErrorMessages, hasNoError, isError }  from "./error";
@@ -22,28 +22,63 @@ import { allT, first, rest, second } from './list';
 
 // ========================================================
 // Eval functions
+const getThunkValue = (t:Thunk) :Value4 | Error => L4ForceValue(t.exp,t.env);
 
-const L4applicativeEval = (exp: CExp4 | Error, env: Env): Value4 | Error =>
+const L4ForceValue = (exp:CExp4 | Error, env:Env): Value4 | Error=>{
+    const evaled_regular  = L4applicativeEval(exp, env);
+    if(isThunk(evaled_regular))
+        return L4ForceValue(evaled_regular.exp,evaled_regular.env);
+    else
+        return evaled_regular
+}                                                         //possibly returns a Thunk on VarRef
+const L4applicativeEval = (exp: CExp4| Thunk | Error, env: Env): Value4| Thunk  |Error =>
     isError(exp)  ? exp :
     isNumExp(exp) ? exp.val :
     isBoolExp(exp) ? exp.val :
     isStrExp(exp) ? exp.val :
     isPrimOp(exp) ? exp :
-    isVarRef(exp) ? applyEnv(env, exp.var) :
+    isVarRef(exp) ? applyEnv(env, exp.var) :    //TODO: CHECK IF CORRECT
     isLitExp4(exp) ? exp.val :
     isIfExp4(exp) ? evalIf4(exp, env) :
     isProcExp4(exp) ? evalProc4(exp, env) :
     isLetExp4(exp) ? evalLet4(exp, env) :
     isLetrecExp4(exp) ? evalLetrec4(exp, env) :
-    isSetExp4(exp) ? evalSet(exp, env) :
-    isAppExp4(exp) ? L4specialApplyProcedure(L4applicativeEval(exp.rator, env),exp.rands,env) :
+    isThunk(exp)    ? getThunkValue(exp):   //3. when it is the value required.
+    isSetExp4(exp) ? evalSet(exp, env) :    //4. when it is a value of an operator that's about to be applied
+    isAppExp4(exp) ? L4applyProcedureNew(L4ForceValue(exp.rator, env), exp.rands, env) :
     Error(`Bad L4 AST ${exp}`);
 
-export const isTrueValue = (x: Value4 | Error): boolean | Error =>
-    isError(x) ? x :
-    ! (x === false);
 
-const evalIf4 = (exp: IfExp4, env: Env): Value4 | Error => {
+
+const L4applyProcedureNew = (proc: Value4 | Error, args: Array<CExp4>, env:Env): Value4 | Error =>{
+    if(isError(proc)){
+        return proc;
+    }
+    else if(isPrimOp(proc) && hasNoError(args)){    //1. passed to  a primitive procedure
+                                //won't be errors! so casting.
+        return applyPrimitive(proc,<Value4[]>args.map((arg)=>L4ForceValue(arg, env)))
+
+    }
+    else if ( !hasNoError(args) )
+        Error(`Bad argument: ${getErrorMessages(args)}`)
+    else if(isClosure4(proc)){
+            
+    const newArgs=zip(proc.params, args).map((p)=>   isLazyVarDecl(p["0"])   ? makeThunk(p["1"],env) : L4applicativeEval(p["1"],env));
+     if(!hasNoError(newArgs))    
+        return Error(`Bad argument: ${getErrorMessages(newArgs)}`)                                   
+    return applyClosure4(proc,newArgs);
+    }
+    else
+        return Error(`Bad procedure ${JSON.stringify(proc)}`);
+ 
+}
+    //2.can get a Thunk argument. if so - Force it's value and then answer
+export const isTrueValue = (x: Value4 | Thunk |Error): boolean | Error =>
+    isError(x) ? x :
+    isThunk(x) ? isTrueValue(getThunkValue(x)):
+    ! (x === false);
+                                //can possibly return a thunk (from 'then' or 'else' (alt))
+const evalIf4 = (exp: IfExp4, env: Env): Value4 | Thunk |Error => {
     const test = L4applicativeEval(exp.test, env);
     return isError(test) ? test :
         isTrueValue(test) ? L4applicativeEval(exp.then, env) :
@@ -52,38 +87,6 @@ const evalIf4 = (exp: IfExp4, env: Env): Value4 | Error => {
 
 const evalProc4 = (exp: ProcExp4, env: Env): Closure4 =>
     makeClosure4(exp.args, exp.body, env);
-
-
-const L4specialApplyProcedure = (proc: Value4 | Error, args: Array<CExp4 | Error>, env : Env): Value4 | Error =>{
-   
-    if(isError(proc))
-        return proc;
-    if(!hasNoError(args))
-        Error(`Bad argument: ${getErrorMessages(args)}`);
-    if(isPrimOp(proc)){
-
-    }
-    else if( isClosure4(proc)){ //if it's lazy, make a Thunk object. otherwise  -   evaluate it.
-        //a list of evaluated values and Thunks.
-        const parially_evaled   =   zip(proc.params,args).map((pair)=> isLazyVarDecl(pair["0"]) ?   makeThunk(pair["1"], env) :
-        
-                                                                                                     L4applicativeEval(pair["1"],env) )
-        
-
-    }
-    else{
-        return Error(`Bad procedure ${JSON.stringify(proc)}`);
-    }
-   
-   
-    // isError(proc) ? return proc :
-    // !hasNoError(args) ? Error(`Bad argument: ${getErrorMessages(args)}`) :
-    // isPrimOp(proc) ? applyPrimitive(proc, args) :
-    // isClosure4(proc) ? applyClosure4(proc, args) :
-    // Error(`Bad procedure ${JSON.stringify(proc)}`);
-
-}
-
 
 // @Pre: none of the args is an Error (checked in applyProcedure)
 // KEY: This procedure does NOT have an env parameter.
@@ -95,8 +98,8 @@ const L4applyProcedure = (proc: Value4 | Error, args: Array<Value4 | Error>): Va
     isClosure4(proc) ? applyClosure4(proc, args) :
     Error(`Bad procedure ${JSON.stringify(proc)}`);
 
-const applyClosure4 = (proc: Closure4, args: Value4[]): Value4 | Error => {
-    let vars = map((v: VarDecl | LazyVarDecl) => v.var, proc.params);
+const applyClosure4 = (proc: Closure4, args: (Value4 | Thunk)[]): Value4 | Error => {
+    let vars = map((v: VarDecl) => v.var, proc.params);
     return evalExps(proc.body, makeExtEnv(vars, args, proc.env));
 }
 
@@ -104,7 +107,8 @@ const applyClosure4 = (proc: Closure4, args: Value4[]): Value4 | Error => {
 export const evalExps = (exps: Exp4[], env: Env): Value4 | Error =>
     isEmpty(exps) ? Error("Empty program") :
     isDefineExp4(first(exps)) ? evalDefineExps4(exps) :
-    isEmpty(rest(exps)) ? L4applicativeEval(first(exps), env) :
+    //                     3. when it's the value required (last one?)
+    isEmpty(rest(exps)) ? L4ForceValue(first(exps), env) :
     isError(L4applicativeEval(first(exps), env)) ? Error("error") :
     evalExps(rest(exps), env);
 
@@ -125,7 +129,7 @@ const evalDefineExps4 = (exps: Exp4[]): Value4 | Error => {
 // LET: Direct evaluation rule without syntax expansion
 // compute the values, extend the env, eval the body.
 const evalLet4 = (exp: LetExp4, env: Env): Value4 | Error => {
-    const vals: Array <Value4 | Error> = map((v) => L4applicativeEval(v, env), map((b) => b.val, exp.bindings));
+    const vals: Array <Value4 | Thunk | Error> = map((v) => L4applicativeEval(v, env), map((b) => b.val, exp.bindings));
     const vars = map((b) => b.var.var, exp.bindings);
     if (hasNoError(vals)) {
         return evalExps(exp.body, makeExtEnv(vars, vals, env));

@@ -5,7 +5,7 @@
 
 import * as assert from "assert";
 import { all, apply, filter, map, reduce, zipWith } from "ramda";
-import { AtomicExp, VarDecl, VarRef } from './L3-ast';
+import { AtomicExp, VarDecl, VarRef, LazyVarDecl,makeLazyVarDecl } from './L3-ast';
 import { isAtomicExp } from './L3-ast';
 import { isArray, isEmpty, isNumericString, isSexpString, isString } from './L3-ast';
 import { makeVarDecl, makeVarRef } from './L3-ast';
@@ -67,7 +67,7 @@ export interface DefineExp4 {tag: "DefineExp4"; var: VarDecl; val: CExp4; };
 export interface AppExp4 {tag: "AppExp4"; rator: CExp4; rands: CExp4[]; };
 // L2
 export interface IfExp4 {tag: "IfExp4"; test: CExp4; then: CExp4; alt: CExp4; };
-export interface ProcExp4 {tag: "ProcExp4"; args: VarDecl[], body: CExp4[]; };
+export interface ProcExp4 {tag: "ProcExp4"; args: (VarDecl | LazyVarDecl)[], body: CExp4[]; };
 export interface Binding4 {tag: "Binding4"; var: VarDecl; val: CExp4; };
 // L3
 export interface LetExp4 {tag: "LetExp4"; bindings: Binding4[]; body: CExp4[]; };
@@ -85,7 +85,7 @@ export const makeAppExp4 = (rator: CExp4, rands: CExp4[]): AppExp4 =>
 // L2
 export const makeIfExp4 = (test: CExp4, then: CExp4, alt: CExp4): IfExp4 =>
     ({tag: "IfExp4", test: test, then: then, alt: alt});
-export const makeProcExp4 = (args: VarDecl[], body: CExp4[]): ProcExp4 =>
+export const makeProcExp4 = (args: (VarDecl | LazyVarDecl)[], body: CExp4[]): ProcExp4 =>
     ({tag: "ProcExp4", args: args, body: body});
 export const makeBinding4 = (v: VarDecl, val: CExp4): Binding4 =>
     ({tag: "Binding4", var: v, val: val});
@@ -167,6 +167,12 @@ const parseL4CompoundCExp = (sexps: any[]): CExp4 | Error =>
     first(sexps) === "set!" ? parseSetExp4(sexps) :
     first(sexps) === "quote" ? parseLitExp4(sexps) :
     parseAppExp4(sexps)
+//Added Support for LazyVarDecl
+
+export const newMakeVarDecl=(v: any):(VarDecl | LazyVarDecl)=>
+    (isArray(v) && v.length === 2 && second(v) === "lazy") ?
+    makeLazyVarDecl(first(v)):
+    makeVarDecl(v) ;   
 
 const parseAppExp4 = (sexps: any[]): AppExp4 | Error =>
     safeFL((cexps: CExp4[]) => makeAppExp4(first(cexps), rest(cexps)))(map(parseL4CExp, sexps));
@@ -175,7 +181,7 @@ const parseIfExp4 = (sexps: any[]): IfExp4 | Error =>
     safeFL((cexps: CExp4[]) => makeIfExp4(cexps[0], cexps[1], cexps[2]))(map(parseL4CExp, rest(sexps)));
 
 const parseProcExp4 = (sexps: any[]): ProcExp4 | Error =>
-    safeFL((body: CExp4[]) => makeProcExp4( map(makeVarDecl, sexps[1]), body))
+    safeFL((body: CExp4[]) => makeProcExp4( map(newMakeVarDecl, sexps[1]), body))
         (map(parseL4CExp, rest(rest(sexps))));
 
 // LetExp ::= (let (<binding>*) <cexp>+)
